@@ -224,7 +224,6 @@ static struct wl_surface *get_surface(struct waydroid_hwc_composer_device_1 *pde
     }
 
     wl_subsurface_set_position(window->subsurfaces[window->lastLayer], left, top);
-    wl_subsurface_set_desync(window->subsurfaces[window->lastLayer]);
 
     pdev->display->layers[window->surfaces[window->lastLayer]] = {
         .x = layer->displayFrame.left,
@@ -599,7 +598,7 @@ static int hwc_set(struct hwc_composer_device_1* dev,size_t numDisplays,
                     }
 
                     wl_surface_attach(pdev->display->cursor_surface, buf->buffer, 0, 0);
-                    wl_surface_damage(pdev->display->cursor_surface, 0, 0, buf->width, buf->height);
+                    wl_surface_damage_buffer(pdev->display->cursor_surface, 0, 0, buf->width, buf->height);
                     if (pdev->display->scale > 1)
                         wl_surface_set_buffer_scale(pdev->display->cursor_surface, pdev->display->scale);
 
@@ -687,8 +686,6 @@ static int hwc_set(struct hwc_composer_device_1* dev,size_t numDisplays,
         }
 
         wl_surface_commit(surface);
-        if (pdev->use_subsurface)
-            wl_surface_commit(window->surface);
 
         const int kAcquireWarningMS = 100;
         err = sync_wait(fb_layer->acquireFenceFd, kAcquireWarningMS);
@@ -702,21 +699,22 @@ static int hwc_set(struct hwc_composer_device_1* dev,size_t numDisplays,
     if (pdev->display->geo_changed) {
         for (auto it = pdev->windows.begin(); it != pdev->windows.end(); it++) {
             if (it->second) {
-                // This window has no changes in layers, leaving it
-                if (!it->second->lastLayer)
-                    continue;
+                for (int l = 0; l < it->second->lastLayer; l++)
+                    wl_subsurface_place_above(it->second->subsurfaces[l],
+                                              l > 0 ? it->second->surfaces[l-1] : it->second->surface);
                 // Neutralize unused surfaces
                 for (size_t l = it->second->lastLayer; l < it->second->surfaces.size(); l++) {
-                    if (it->second->surfaces.find(l) != it->second->surfaces.end()) {
-                        wl_surface_attach(it->second->surfaces[l], NULL, 0, 0);
-                        wl_surface_commit(it->second->surfaces[l]);
-                        wl_surface_commit(it->second->surface);
-                    }
+                    wl_surface_attach(it->second->surfaces[l], NULL, 0, 0);
+                    wl_surface_commit(it->second->surfaces[l]);
                 }
             }
         }
         pdev->display->geo_changed = false;
     }
+    if (pdev->use_subsurface)
+        for (auto it = pdev->windows.begin(); it != pdev->windows.end(); it++)
+            if (it->second)
+                wl_surface_commit(it->second->surface);
     wl_display_flush(pdev->display->display);
 
     /* TODO: According to[1] the contents->retireFenceFd is the responsibility
@@ -964,10 +962,11 @@ static int hwc_open(const struct hw_module_t* module, const char* name,
 
     pdev->vsync_period_ns = 1000*1000*1000/60; // vsync is 60 hz
 
-    pdev->use_subsurface = property_get_bool("persist.waydroid.multi_windows", false);
-    if (pdev->use_subsurface)
-        pdev->timeline_fd = -1;
-    else
+    pdev->use_subsurface = property_get_bool("persist.waydroid.multi_windows", false) ||
+                           property_get_bool("persist.waydroid.force_subsurfaces", false);
+    //if (pdev->use_subsurface)
+    //    pdev->timeline_fd = -1;
+    //else
         pdev->timeline_fd = sw_sync_timeline_create();
     pdev->next_sync_point = 1;
 
