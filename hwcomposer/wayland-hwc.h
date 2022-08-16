@@ -96,6 +96,7 @@ struct display {
     struct wl_touch *touch;
     struct wl_output *output;
     struct wp_presentation *presentation;
+    struct wp_viewporter *viewporter;
     struct android_wlegl *android_wlegl;
     struct zwp_linux_dmabuf_v1 *dmabuf;
     struct xdg_wm_base *wm_base;
@@ -165,6 +166,7 @@ struct window {
     struct xdg_toplevel *xdg_toplevel;
     std::map<size_t, struct wl_surface *> surfaces;
     std::map<size_t, struct wl_subsurface *> subsurfaces;
+    std::map<size_t, struct wp_viewport *> viewports;
     struct wl_callback *callback;
     int lastLayer;
     std::string taskID;
