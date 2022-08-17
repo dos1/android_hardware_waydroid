@@ -300,6 +300,7 @@ xdg_toplevel_handle_configure(void *data, struct xdg_toplevel *,
 	}
 
     if (! window->display->isWinResSet) {
+        xdg_surface_set_window_geometry(window->xdg_surface, 0, 0, width, height);
         if (window->display->scale > 1) {
             width *= window->display->scale;
             height *= window->display->scale;
