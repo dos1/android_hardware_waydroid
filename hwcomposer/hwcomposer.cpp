@@ -359,7 +359,6 @@ static int hwc_set(struct hwc_composer_device_1* dev,size_t numDisplays,
     }
 
     hwc_display_contents_1_t* contents = displays[HWC_DISPLAY_PRIMARY];
-    contents->retireFenceFd = sw_sync_fence_create(pdev->timeline_fd, "hwc_contents_release", pdev->next_sync_point);
 
     /*
      * In prop "persist.waydroid.multi_windows" we detect HWC let SF rander layers 
@@ -392,11 +391,7 @@ static int hwc_set(struct hwc_composer_device_1* dev,size_t numDisplays,
             hwc_layer_1_t* fb_layer = &contents->hwLayers[layer];
             if (fb_layer->acquireFenceFd != -1)
                 close(fb_layer->acquireFenceFd);
-            close(contents->retireFenceFd);
-            contents->retireFenceFd = -1;
         }
-        close(contents->retireFenceFd);
-        contents->retireFenceFd = -1;
 
         property_set("waydroid.open_windows", "0");
         return 0;
@@ -449,11 +444,7 @@ static int hwc_set(struct hwc_composer_device_1* dev,size_t numDisplays,
                 hwc_layer_1_t* fb_layer = &contents->hwLayers[layer];
                 if (fb_layer->acquireFenceFd != -1)
                     close(fb_layer->acquireFenceFd);
-                close(contents->retireFenceFd);
-                contents->retireFenceFd = -1;
             }
-            close(contents->retireFenceFd);
-            contents->retireFenceFd = -1;
 
             property_set("waydroid.open_windows", "0");
             return 0;
@@ -674,13 +665,13 @@ static int hwc_set(struct hwc_composer_device_1* dev,size_t numDisplays,
         if (fb_layer->compositionType != HWC_FRAMEBUFFER &&
             fb_layer->compositionType != HWC_SIDEBAND)
         {
+            int timeline_fd = sw_sync_timeline_create();
             /* To be signaled when the compositor releases the buffer */
-            fb_layer->releaseFenceFd = sw_sync_fence_create(pdev->timeline_fd, "wayland_release", pdev->next_sync_point++);
-            buf->release_fence_fd = fb_layer->releaseFenceFd;
+            fb_layer->releaseFenceFd = sw_sync_fence_create(timeline_fd, "wayland_release", 1);
+            buf->timeline_fd = timeline_fd;
         } else {
-            buf->release_fence_fd = -1;
+            buf->timeline_fd = -1;
         }
-        buf->timeline_fd = pdev->timeline_fd;
 
         struct wl_surface *surface = get_surface(pdev, fb_layer, window, pdev->use_subsurface);
         if (!surface) {
@@ -761,13 +752,8 @@ static int hwc_set(struct hwc_composer_device_1* dev,size_t numDisplays,
                 wl_surface_commit(it->second->surface);
     wl_display_flush(pdev->display->display);
 
-    /* TODO: According to[1] the contents->retireFenceFd is the responsibility
-     * of SurfaceFlinger to close, but leaving it open is causing a graphical
-     * stall.
-     * [1] https://android.googlesource.com/platform/hardware/libhardware/+/master/include/hardware/hwcomposer.h#333
-     */
-    close(contents->retireFenceFd);
-    contents->retireFenceFd = -1;
+    sw_sync_timeline_inc(pdev->timeline_fd, 1);
+    contents->retireFenceFd = sw_sync_fence_create(pdev->timeline_fd, "hwc_contents_release", ++pdev->next_sync_point);
 
     return err;
 }
@@ -1007,10 +993,7 @@ static int hwc_open(const struct hw_module_t* module, const char* name,
     pdev->vsync_period_ns = 1000*1000*1000/60; // vsync is 60 hz
 
     pdev->use_subsurface = property_get_bool("persist.waydroid.multi_windows", false);
-    if (pdev->use_subsurface)
-        pdev->timeline_fd = -1;
-    else
-        pdev->timeline_fd = sw_sync_timeline_create();
+    pdev->timeline_fd = sw_sync_timeline_create();
     pdev->next_sync_point = 1;
 
     if (property_get("waydroid.xdg_runtime_dir", property, "/run/user/1000") > 0) {
