@@ -396,6 +396,8 @@ destroy_window(struct window *window, bool keep)
             wl_shell_surface_destroy(window->shell_surface);
         if (window->viewport)
             wp_viewport_destroy(window->viewport);
+        if (window->buffer)
+            wl_buffer_destroy(window->buffer);
 
         wl_surface_destroy(window->surface);
     }
@@ -418,6 +420,7 @@ create_window(struct display *display, bool with_dummy, std::string appID, std::
     window->taskID = taskID;
     window->isActive = true;
     window->viewport = NULL;
+    window->buffer = NULL;
 
     if (display->wm_base) {
         window->xdg_surface =
@@ -485,10 +488,10 @@ create_window(struct display *display, bool with_dummy, std::string appID, std::
         *buf = color.a << 24 | color.r << 16 | color.g << 8 | color.b;
 
         struct wl_shm_pool *pool = wl_shm_create_pool(display->shm, fd, 4);
-        struct wl_buffer *buffer_shm = wl_shm_pool_create_buffer(pool, 0, 1, 1, 4, WL_SHM_FORMAT_ARGB8888);
+        window->buffer = wl_shm_pool_create_buffer(pool, 0, 1, 1, 4, WL_SHM_FORMAT_ARGB8888);
         wl_shm_pool_destroy(pool);
         close(fd);
-        wl_surface_attach(window->surface, buffer_shm, 0, 0);
+        wl_surface_attach(window->surface, window->buffer, 0, 0);
         wl_surface_damage_buffer(window->surface, 0, 0, 1, 1);
         window->viewport = wp_viewporter_get_viewport(display->viewporter, window->surface);
         wp_viewport_set_source(window->viewport, wl_fixed_from_int(0), wl_fixed_from_int(0), wl_fixed_from_int(1), wl_fixed_from_int(1));
