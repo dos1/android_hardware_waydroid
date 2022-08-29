@@ -313,9 +313,14 @@ xdg_toplevel_handle_configure(void *data, struct xdg_toplevel *,
 }
 
 static void
+send_pointer_motion_event(display *data, uint32_t x, uint32_t y);
+
+static void
 xdg_toplevel_handle_close(void *data, struct xdg_toplevel *)
 {
     struct window *window = (struct window *)data;
+
+    send_pointer_motion_event(window->display, 0, 0);
 
     if (window->display->task != nullptr) {
         if (window->taskID != "none") {
@@ -583,6 +588,43 @@ send_key_event(display *data, uint32_t key, wl_keyboard_key_state state)
 }
 
 static void
+send_pointer_motion_event(display *data, uint32_t x, uint32_t y)
+{
+    struct input_event event[5];
+    struct timespec rt;
+    unsigned int res, n = 0;
+
+    if (ensure_pipe(display, INPUT_POINTER))
+        return;
+
+    if (!display->pointer_surface)
+        return;
+
+    if (clock_gettime(CLOCK_MONOTONIC, &rt) == -1) {
+        ALOGE("%s:%d error in touch clock_gettime: %s",
+              __FILE__, __LINE__, strerror(errno));
+    }
+    if (display->scale > 1) {
+        x *= display->scale;
+        y *= display->scale;
+    }
+    x += display->layers[display->pointer_surface].x;
+    y += display->layers[display->pointer_surface].y;
+
+    ADD_EVENT(EV_ABS, ABS_X, x);
+    ADD_EVENT(EV_ABS, ABS_Y, y);
+    ADD_EVENT(EV_REL, REL_X, x - display->ptrPrvX);
+    ADD_EVENT(EV_REL, REL_Y, y - display->ptrPrvY);
+    ADD_EVENT(EV_SYN, SYN_REPORT, 0);
+    display->ptrPrvX = x;
+    display->ptrPrvY = y;
+
+    res = write(display->input_fd[INPUT_POINTER], &event, sizeof(event));
+    if (res < sizeof(event))
+        ALOGE("Failed to write event for InputFlinger: %s", strerror(errno));
+}
+
+static void
 keyboard_handle_keymap(void *, struct wl_keyboard *,
                uint32_t, int fd, uint32_t)
 {
@@ -676,42 +718,7 @@ static void
 pointer_handle_motion(void *data, struct wl_pointer *,
                       uint32_t, wl_fixed_t sx, wl_fixed_t sy)
 {
-    struct display* display = (struct display*)data;
-    struct input_event event[5];
-    struct timespec rt;
-    int x, y;
-    unsigned int res, n = 0;
-
-    if (ensure_pipe(display, INPUT_POINTER))
-        return;
-
-    if (!display->pointer_surface)
-        return;
-
-    if (clock_gettime(CLOCK_MONOTONIC, &rt) == -1) {
-        ALOGE("%s:%d error in touch clock_gettime: %s",
-              __FILE__, __LINE__, strerror(errno));
-    }
-    x = wl_fixed_to_int(sx);
-    y = wl_fixed_to_int(sy);
-    if (display->scale > 1) {
-        x *= display->scale;
-        y *= display->scale;
-    }
-    x += display->layers[display->pointer_surface].x;
-    y += display->layers[display->pointer_surface].y;
-
-    ADD_EVENT(EV_ABS, ABS_X, x);
-    ADD_EVENT(EV_ABS, ABS_Y, y);
-    ADD_EVENT(EV_REL, REL_X, x - display->ptrPrvX);
-    ADD_EVENT(EV_REL, REL_Y, y - display->ptrPrvY);
-    ADD_EVENT(EV_SYN, SYN_REPORT, 0);
-    display->ptrPrvX = x;
-    display->ptrPrvY = y;
-
-    res = write(display->input_fd[INPUT_POINTER], &event, sizeof(event));
-    if (res < sizeof(event))
-        ALOGE("Failed to write event for InputFlinger: %s", strerror(errno));
+    send_pointer_motion_event((struct display*)data, wl_fixed_to_int(sx), wl_fixed_to_int(sy));
 }
 
 static void
